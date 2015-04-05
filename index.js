@@ -4,7 +4,9 @@ var ffmpeg = require('ffmpeg'),
     mkdirp = require('mkdirp'),
     sleep = require('sleep'),
     Q = require('q'),
-    table = require('text-table');
+    table = require('text-table'),
+    exec = require('child_process').exec;
+
 
 var fs = require('fs');
 
@@ -40,12 +42,18 @@ return Q.nfcall(mkdirp, outputFolder)
     .then(function(samples) {
         return outputSamples(samples, 'Test Samples:');
     })
+    .then(function() {
+        return startParallelConvertTest(5, 10);
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Concurrent Test Samples:');
+    })
     .catch(function(error) {
-        console.log(error.stack);
+        statsTracker.stopTracking();
         console.log(error);
     });
 
-// Gather control samples before the test
+// Gather control samples before a test
 function getControlSamples() {
     console.log('Getting ' + controlSamples + ' control samples...');
     return statsTracker.getSamples(controlSamples, 1000);
@@ -105,6 +113,45 @@ function startVideoConvertTest(duration) {
             statsTracker.stopTracking();
             console.log(err);
         });
+}
+
+// Begins a test running two video conversions in parallel
+function startParallelConvertTest(duration1, duration2) {
+    var deferred = Q.defer();
+    console.log('Converting video files in parallel...');
+    var command1 = 'ffmpeg -i video_input.ogg -f mov -vcodec h264 -t ' + duration1 + ' -acodec libmp3lame output/parallel_' + duration1 + '.mov';
+    var command2 = 'ffmpeg -i video_input.ogg -f mov -vcodec h264 -t ' + duration2 + ' -acodec libmp3lame output/parallel_' + duration2 + '.mov';
+    var child1 = exec(command1);
+    var child2 = exec(command2);
+    var childRunning1 = true;
+    var childRunning2 = true;
+    statsTracker.startTracking(1000);
+    var samples;
+    child1.on('exit', function(code) {
+        if (code === 0) {
+            childRunning1 = false;
+            if(!childRunning2) {
+                deferred.reject();
+            } else {
+                samples = statsTracker.stopTracking();
+            }
+        } else {
+            deferred.reject(code);
+        }
+    });
+    child2.on('exit', function(code) {
+        if (code === 0) {
+            childRunning2 = false;
+            if(childRunning1) {
+                deferred.reject();
+            } else {
+                deferred.resolve(samples);
+            }
+        } else {
+            deferred.reject(code);
+        }
+    });
+    return deferred.promise;
 }
 
 // Converts a video file to a mov file format and returns a promise
