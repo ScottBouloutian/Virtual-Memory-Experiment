@@ -1,16 +1,47 @@
+require('array.prototype.find');
+
 var Q = require('q');
 
 var exec = require('child_process').exec;
 
-var currentlyTracking = false;
 var tracker;
 var samples;
 
-// Function to get 'n' samples with 'delay' ms in-between each one
-exports.getSamples = function(n, delay, callback) {
+// Structure defining which statistics to collect
+var stats = [{
+    key: 'pages_free',
+    search: 'Pages free'
+}, {
+    key: 'pages_active',
+    search: 'Pages active'
+}, {
+    key: 'pages_inactive',
+    search: 'Pages inactive'
+}, {
+    key: 'page_ins',
+    search: 'Pageins'
+}, {
+    key: 'page_outs',
+    search: 'Pageouts'
+}, {
+    key: 'swap_ins',
+    search: 'Swapins'
+}, {
+    key: 'swap_outs',
+    search: 'Swapouts'
+}];
+
+exports.measuredStats = function() {
+    return stats.map(function(stat) {
+        return stat.key;
+    });
+};
+
+// Function to get 'n' samples with 'delay' ms in-between each one and return a promise
+exports.getSamples = function(n, delay) {
     var samples = [];
     var promise = Q();
-    for(var i=0;i<n;i++) {
+    for (var i = 0; i < n; i++) {
         promise = promise.then(function() {
             return getStats()
                 .then(function(stats) {
@@ -19,8 +50,8 @@ exports.getSamples = function(n, delay, callback) {
                 });
         });
     }
-    promise.then(function() {
-        callback(null, samples);
+    return promise.then(function() {
+        return samples;
     });
 };
 
@@ -47,15 +78,18 @@ function getStats() {
             var stdout = results[0];
             var lines = stdout.split('\n');
             var search = 'Pages free'
-            var stats = {};
+            var sample = {};
             for (var i = 0; i < lines.length; i++) {
-                if (lines[i].substr(0, search.length) === search) {
+                // See if one of the stats we want to measure is in the output
+                var stat = stats.find(function(stat) {
+                    return (lines[i].substr(0, stat.search.length) === stat.search);
+                });
+                if(stat) {
                     var temp = lines[i].split(':');
                     var numStr = temp[1].substr(0, temp[1].length - 1).trim();
-                    stats.pages_free = parseInt(numStr)
-                    break;
-                };
+                    sample[stat.key] = parseInt(numStr)
+                }
             }
-            return stats;
+            return sample;
         });
 }

@@ -2,7 +2,9 @@
 
 var ffmpeg = require('ffmpeg'),
     mkdirp = require('mkdirp'),
-    sleep = require('sleep');
+    sleep = require('sleep'),
+    Q = require('q'),
+    table = require('text-table');
 
 var fs = require('fs');
 
@@ -12,7 +14,8 @@ var statsTracker = require('./statsTracker');
 // Configuration
 var inputFile = 'video_input.ogg', // Path to a large video file
     controlSamples = 1, // The number of control samples to gather before a test
-    outputFolder = 'output'; // The folder in which to save generated files
+    outputFolder = 'output', // The folder in which to save generated files
+    dataFile = 'stats.txt'; // The file in which to write test results
 
 // Begin the virtual memory tests
 console.log('Welcome to this virtual memory testing script!');
@@ -23,56 +26,105 @@ if (fs.existsSync(outputFolder)) {
     process.exit(1);
 }
 
+// Run the testing suite
+return Q.nfcall(mkdirp, outputFolder)
+    .then(function() {
+        return getControlSamples();
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Control Samples:');
+    })
+    .then(function() {
+        return startVideoConvertTest(5);
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Test Samples:');
+    })
+    .catch(function(error) {
+        console.log(error.stack);
+        console.log(error);
+    });
+
 // Gather control samples before the test
-console.log('Getting ' + controlSamples + ' control samples...');
-statsTracker.getSamples(controlSamples, 1000, function(err, samples) {
+function getControlSamples() {
+    console.log('Getting ' + controlSamples + ' control samples...');
+    return statsTracker.getSamples(controlSamples, 1000);
+}
 
-    // Output the control samples
-    console.log('Control Samples:');
-    console.log(samples);
+// Writes a summary of the samples taken to a file
+function outputSamples(samples, msg) {
+    // Write a message describing the samples taken
+    fs.appendFileSync(outputFolder + '/' + dataFile, msg + '\n\n');
 
-    // Begin the test
+    // Prepare the column headers
+    var columnHeaders = statsTracker.measuredStats();
+    columnHeaders.unshift('index');
+
+    // Construct the table to be displayed
+    var tableArray = [columnHeaders];
+
+    // Add the samples to the table array
+    samples.forEach(function(sample, index) {
+        var row = [];
+        row.push(index);
+        statsTracker.measuredStats().forEach(function(stat) {
+            row.push(sample[stat]);
+        });
+        tableArray.push(row);
+    });
+
+    // Render the table
+    var t = table(tableArray, {
+        align: function() {
+            var result = [];
+            columnHeaders.forEach(function() {
+                result.push('r');
+            });
+            return result;
+        }()
+    });
+
+    // Write the table to the file
+    fs.appendFileSync(outputFolder + '/' + dataFile, t + '\n\n');
+}
+
+// Begins a video conversion test
+// The test converts the first 'duration' seconds of the input video whilst measuring machine statistics
+function startVideoConvertTest(duration) {
     console.log('Converting the video file...');
     statsTracker.startTracking(1000);
-    convertVideo(inputFile, 'bunny_10.mov', function(err) {
-        var samples = statsTracker.stopTracking();
-        if (err) {
-            console.log(err);
-            process.exit(1);
-        } else {
-            // The video conversion has successfully completed
-            console.log('Video conversion completed successfully!');
-
-            // Output the samples taken during the test
-            console.log('Test Samples:');
-            console.log(samples);
-        }
-    });
-
-});
-
-// Converts a video file to a mov file format
-function convertVideo(inputFilePath, outputFileName, callback) {
+    var outputFileName = 'output_' + duration + '.mov';
     var outputFilePath = outputFolder + '/' + outputFileName;
-    // Create the output folder
-    mkdirp(outputFolder, function(err) {
-        if (err) {
-            callback(err);
-        } else {
-            var convert_process = new ffmpeg(inputFilePath);
-            convert_process.then(function(video) {
-                video.setVideoDuration(10)
-                video.setVideoFormat('mov')
-                video.setVideoCodec('h264')
-                video.setAudioCodec('mp3')
-                    .save(outputFilePath, function(error, file) {
-                        if (!error) {
-                            callback(null);
-                        }
-                    });
-            }, function(err) {
-                callback(err);
-            });
-        }
-    });
+    return convertVideo(inputFile, outputFilePath, duration)
+        .then(function() {
+            var samples = statsTracker.stopTracking();
+            console.log('Video conversion completed successfully!');
+            return samples;
+        })
+        .catch(function(error) {
+            statsTracker.stopTracking();
+            console.log(err);
+        });
+}
+
+// Converts a video file to a mov file format and returns a promise
+function convertVideo(inputFilePath, outputFilePath, duration) {
+    var deferred = Q.defer();
+    var convert_process = new ffmpeg(inputFilePath);
+    convert_process.then(function(video) {
+            video.setVideoDuration(duration)
+            video.setVideoFormat('mov')
+            video.setVideoCodec('h264')
+            video.setAudioCodec('mp3')
+                .save(outputFilePath, function(error, file) {
+                    if (error) {
+                        deferred.reject(error);
+                    }
+                    deferred.resolve(file);
+                });
+        })
+        .catch(function(error) {
+            return deferred.reject(error);
+        });
+    return deferred.promise;
 }
