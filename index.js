@@ -14,9 +14,9 @@ var fs = require('fs');
 var statsTracker = require('./statsTracker');
 
 // Configuration
-var inputFile = 'video_input.ogg', // Path to a large video file
-    controlSamples = 1, // The number of control samples to gather before a test
-    outputFolder = 'output', // The folder in which to save generated files
+var inputFile = "/media/SCOTT_DRIVE/input.ogg", // Path to a large video file
+    controlSamples = 5, // The number of control samples to gather before a test
+    outputFolder = '/media/SCOTT_DRIVE/output', // The folder in which to save generated files
     dataFile = 'stats.txt'; // The file in which to write test results
 
 // Begin the virtual memory tests
@@ -29,24 +29,66 @@ if (fs.existsSync(outputFolder)) {
 }
 
 // Run the testing suite
-return Q.nfcall(mkdirp, outputFolder)
+Q.nfcall(mkdirp, outputFolder)
     .then(function() {
         return getControlSamples();
     })
     .then(function(samples) {
-        return outputSamples(samples, 'Control Samples:');
+        return outputSamples(samples, 'Control Samples For 6 Second Conversion:');
     })
     .then(function() {
-        return startVideoConvertTest(5);
+        return startVideoConvertTest(6);
     })
     .then(function(samples) {
-        return outputSamples(samples, 'Test Samples:');
+        return outputSamples(samples, 'Test Samples For 6 Second Conversion:');
     })
     .then(function() {
-        return startParallelConvertTest(5, 10);
+        return getControlSamples();
     })
     .then(function(samples) {
-        return outputSamples(samples, 'Concurrent Test Samples:');
+        return outputSamples(samples, 'Control Samples For 60 Second Conversion');
+    })
+    .then(function() {
+        return startVideoConvertTest(60);
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Test Samples For 60 Second Conversion:');
+    })
+    .then(function() {
+        return getControlSamples();
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Control Samples For 600 Second Conversion');
+    })
+    .then(function() {
+        return startVideoConvertTest(600);
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Test Samples For 600 Second Conversion:');
+    })
+    .then(function() {
+        return getControlSamples();
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Control Samples For Parallel 6 and 60 Second Conversion:');
+    })
+    .then(function() {
+        return startParallelConvertTest(6, 60, '1');
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Test Samples For Parallel 6 and 60 Second Conversion:');
+    })
+    .then(function() {
+        return getControlSamples();
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Control Samples For Parallel 60 and 600 Second Conversion:');
+    })
+    .then(function() {
+        return startParallelConvertTest(60, 600, '2');
+    })
+    .then(function(samples) {
+        return outputSamples(samples, 'Test Samples For Parallel 60 and 600 Second Conversion:');
     })
     .catch(function(error) {
         statsTracker.stopTracking();
@@ -80,7 +122,6 @@ function outputSamples(samples, msg) {
         });
         tableArray.push(row);
     });
-
     // Render the table
     var t = table(tableArray, {
         align: function() {
@@ -99,7 +140,7 @@ function outputSamples(samples, msg) {
 // Begins a video conversion test
 // The test converts the first 'duration' seconds of the input video whilst measuring machine statistics
 function startVideoConvertTest(duration) {
-    console.log('Converting the video file...');
+    console.log('Converting video file of length ' + duration + '...');
     statsTracker.startTracking(1000);
     var outputFileName = 'output_' + duration + '.mov';
     var outputFilePath = outputFolder + '/' + outputFileName;
@@ -111,16 +152,16 @@ function startVideoConvertTest(duration) {
         })
         .catch(function(error) {
             statsTracker.stopTracking();
-            console.log(err);
+            console.log(error);
         });
 }
 
 // Begins a test running two video conversions in parallel
-function startParallelConvertTest(duration1, duration2) {
+function startParallelConvertTest(duration1, duration2, suffix) {
     var deferred = Q.defer();
-    console.log('Converting video files in parallel...');
-    var command1 = 'ffmpeg -i video_input.ogg -f mov -vcodec h264 -t ' + duration1 + ' -acodec libmp3lame output/parallel_' + duration1 + '.mov';
-    var command2 = 'ffmpeg -i video_input.ogg -f mov -vcodec h264 -t ' + duration2 + ' -acodec libmp3lame output/parallel_' + duration2 + '.mov';
+    console.log('Converting video files in parallel of lengths ' + duration1 + ' and ' + duration2 + '...');
+    var command1 = 'ffmpeg -i ' + inputFile + ' -f mov -vcodec h264 -t ' + duration1 + ' -acodec libmp3lame ' + outputFolder + '/parallel_' + duration1 + '_' + suffix + '.mov';
+    var command2 = 'ffmpeg -i ' + inputFile + ' -f mov -vcodec h264 -t ' + duration2 + ' -acodec libmp3lame ' + outputFolder + '/parallel_' + duration2 + '_' + suffix + '.mov';
     var child1 = exec(command1);
     var child2 = exec(command2);
     var childRunning1 = true;
@@ -136,7 +177,7 @@ function startParallelConvertTest(duration1, duration2) {
                 samples = statsTracker.stopTracking();
             }
         } else {
-            deferred.reject(code);
+            deferred.reject('child1 error');
         }
     });
     child2.on('exit', function(code) {
@@ -148,7 +189,7 @@ function startParallelConvertTest(duration1, duration2) {
                 deferred.resolve(samples);
             }
         } else {
-            deferred.reject(code);
+            deferred.reject('child2 error');
         }
     });
     return deferred.promise;

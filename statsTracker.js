@@ -9,6 +9,21 @@ var samples;
 
 // Structure defining which statistics to collect
 var stats = [{
+    key: 'virtual',
+    search: 'swpd'
+}, {
+    key: 'free_memory',
+    search: 'free'
+}, {
+    key: 'swap_in',
+    search: 'si'
+}, {
+    key: 'swap_out',
+    search: 'so'
+}];
+
+/*
+var statsOSX = [{
     key: 'pages_free',
     search: 'Pages free'
 }, {
@@ -30,6 +45,7 @@ var stats = [{
     key: 'swap_outs',
     search: 'Swapouts'
 }];
+*/
 
 exports.measuredStats = function() {
     return stats.map(function(stat) {
@@ -73,23 +89,45 @@ exports.stopTracking = function() {
 
 // Retreives machine statistics and returns a promise
 function getStats() {
-    return Q.nfcall(exec, 'vm_stat')
+    return Q.nfcall(exec, 'vmstat')
         .then(function(results) {
             var stdout = results[0];
-            var lines = stdout.split('\n');
-            var search = 'Pages free'
-            var sample = {};
-            for (var i = 0; i < lines.length; i++) {
-                // See if one of the stats we want to measure is in the output
-                var stat = stats.find(function(stat) {
-                    return (lines[i].substr(0, stat.search.length) === stat.search);
-                });
-                if(stat) {
-                    var temp = lines[i].split(':');
-                    var numStr = temp[1].substr(0, temp[1].length - 1).trim();
-                    sample[stat.key] = parseInt(numStr)
-                }
-            }
-            return sample;
+            return parseVmstatRHEL(stdout);
         });
 }
+
+function parseVmstatRHEL(stdout) {
+  var lines = stdout.split('\n');
+  var columnHeaders = lines[1].split(/[ ,]+/);
+  var data = lines[2].split(/[ ,]+/);
+  var sample = {};
+  columnHeaders.forEach(function(header, index) {
+    var stat = stats.find(function(stat) {
+	return header === stat.search;
+    });
+    if(stat) {
+      sample[stat.key] = data[index];
+    }
+  });
+  return sample;
+}
+
+/*
+function parseVmstatOSX(stdout) {
+  var lines = stdout.split('\n');
+  var search = 'Pages free'
+  var sample = {};
+  for (var i = 0; i < lines.length; i++) {
+      // See if one of the stats we want to measure is in the output
+      var stat = stats.find(function(stat) {
+	  return (lines[i].substr(0, stat.search.length) === stat.search);
+      });
+      if(stat) {
+	  var temp = lines[i].split(':');
+	  var numStr = temp[1].substr(0, temp[1].length - 1).trim();
+	  sample[stat.key] = parseInt(numStr)
+      }
+  }
+  return sample;
+}
+*/
